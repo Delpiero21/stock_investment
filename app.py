@@ -64,7 +64,12 @@ def load_market_data(market: str, use_real_data: bool = False):
     
     if use_real_data:
         try:
-            return load_real_data(market)
+            data = load_real_data(market)
+            # 데이터 유효성 검사
+            if data and 'sectors' in data and len(data['sectors']) > 0:
+                if 'turnaround_score' in data['sectors'].columns:
+                    return data
+            st.warning("실제 데이터가 불완전합니다. 샘플 데이터를 사용합니다.")
         except Exception as e:
             st.warning(f"실제 데이터 로드 실패: {e}. 샘플 데이터를 사용합니다.")
     
@@ -76,7 +81,7 @@ def load_real_data(market: str):
     try:
         import FinanceDataReader as fdr
     except ImportError:
-        raise Exception("FinanceDataReader가 설치되어 있지 않습니다. pip install finance-datareader")
+        raise Exception("FinanceDataReader가 설치되어 있지 않습니다.")
     
     end_date = datetime.now()
     start_date = end_date - timedelta(days=120)
@@ -119,53 +124,63 @@ def load_real_data(market: str):
         for code, name in stocks.items():
             try:
                 df = fdr.DataReader(code, start_date, end_date)
-                if len(df) > 20:
-                    prices = df['Close'].values
+                if df is None or len(df) < 20:
+                    continue
                     
-                    # 기술적 지표 계산
-                    ma20 = pd.Series(prices).rolling(20).mean().iloc[-1]
-                    ma60 = pd.Series(prices).rolling(min(60, len(prices))).mean().iloc[-1]
+                if 'Close' not in df.columns:
+                    continue
                     
-                    delta = pd.Series(prices).diff()
-                    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-                    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-                    rs = gain / loss
-                    rsi = (100 - (100 / (1 + rs))).iloc[-1]
-                    
-                    low_price = min(prices)
-                    current_price = prices[-1]
-                    from_low = ((current_price - low_price) / low_price) * 100
-                    ma20_vs_ma60 = ((ma20 / ma60) - 1) * 100 if ma60 > 0 else 0
-                    
-                    # 스코어 계산
-                    score = 0
-                    score += min(from_low / 2, 30)
-                    score += 20 if ma20 > ma60 else 0
-                    score += min(max(rsi - 30, 0) / 2, 25) if not np.isnan(rsi) else 0
-                    score += 15  # 거래량 기본점수
-                    
-                    is_turnaround = score >= 50
-                    
-                    stock_data.append({
-                        'sector': sector_name,
-                        'stock': name,
-                        'from_low': round(from_low, 1),
-                        'ma20_vs_ma60': round(ma20_vs_ma60, 2),
-                        'rsi': round(rsi, 1) if not np.isnan(rsi) else 50,
-                        'volume_ratio': 100,
-                        'foreign_buy': 0,
-                        'turnaround_score': round(min(score, 100)),
-                        'is_turnaround': is_turnaround,
-                    })
-                    
-                    # 섹터 평균용 데이터 수집
-                    sector_prices.append({
-                        'prices': (prices / prices[0] * 100).tolist()[-90:],
-                        'from_low': from_low,
-                        'ma20_vs_ma60': ma20_vs_ma60,
-                        'rsi': rsi if not np.isnan(rsi) else 50,
-                        'score': score
-                    })
+                prices = df['Close'].dropna().values
+                if len(prices) < 20:
+                    continue
+                
+                # 기술적 지표 계산
+                price_series = pd.Series(prices)
+                ma20 = price_series.rolling(20).mean().iloc[-1]
+                ma60 = price_series.rolling(min(60, len(prices))).mean().iloc[-1]
+                
+                delta = price_series.diff()
+                gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+                rs = gain / loss
+                rsi_value = (100 - (100 / (1 + rs))).iloc[-1]
+                rsi = rsi_value if not np.isnan(rsi_value) else 50
+                
+                low_price = float(min(prices))
+                current_price = float(prices[-1])
+                from_low = ((current_price - low_price) / low_price) * 100 if low_price > 0 else 0
+                ma20_vs_ma60 = ((ma20 / ma60) - 1) * 100 if ma60 > 0 else 0
+                
+                # 스코어 계산
+                score = 0
+                score += min(from_low / 2, 30)
+                score += 20 if ma20 > ma60 else 0
+                score += min(max(rsi - 30, 0) / 2, 25)
+                score += 15  # 거래량 기본점수
+                
+                is_turnaround = score >= 50
+                
+                stock_data.append({
+                    'sector': sector_name,
+                    'stock': name,
+                    'from_low': round(float(from_low), 1),
+                    'ma20_vs_ma60': round(float(ma20_vs_ma60), 2),
+                    'rsi': round(float(rsi), 1),
+                    'volume_ratio': 100.0,
+                    'foreign_buy': 0.0,
+                    'turnaround_score': round(min(float(score), 100)),
+                    'is_turnaround': is_turnaround,
+                })
+                
+                # 섹터 평균용 데이터 수집
+                normalized_prices = (prices / prices[0] * 100).tolist()
+                sector_prices.append({
+                    'prices': normalized_prices[-90:] if len(normalized_prices) > 90 else normalized_prices,
+                    'from_low': from_low,
+                    'ma20_vs_ma60': ma20_vs_ma60,
+                    'rsi': rsi,
+                    'score': score
+                })
             except Exception as e:
                 continue
         
@@ -178,30 +193,33 @@ def load_real_data(market: str):
             
             # 가격 데이터 평균
             min_len = min(len(s['prices']) for s in sector_prices)
-            avg_prices = np.mean([s['prices'][:min_len] for s in sector_prices], axis=0)
+            if min_len > 0:
+                avg_prices = np.mean([s['prices'][:min_len] for s in sector_prices], axis=0)
+            else:
+                avg_prices = [100.0] * 90
             
             sector_data.append({
                 'sector': sector_name,
-                'prices': avg_prices.tolist(),
+                'prices': avg_prices.tolist() if isinstance(avg_prices, np.ndarray) else avg_prices,
                 'dates': dates[:len(avg_prices)].tolist(),
-                'current_price': avg_prices[-1],
-                'from_low': round(avg_from_low, 1),
-                'ma20': 0,
-                'ma60': 0,
-                'ma20_vs_ma60': round(avg_ma, 2),
-                'rsi': round(avg_rsi, 1),
-                'volume_ratio': 100,
-                'foreign_buy': 0,
-                'turnaround_score': round(min(avg_score, 100)),
+                'current_price': float(avg_prices[-1]) if len(avg_prices) > 0 else 100.0,
+                'from_low': round(float(avg_from_low), 1),
+                'ma20': 0.0,
+                'ma60': 0.0,
+                'ma20_vs_ma60': round(float(avg_ma), 2),
+                'rsi': round(float(avg_rsi), 1),
+                'volume_ratio': 100.0,
+                'foreign_buy': 0.0,
+                'turnaround_score': round(min(float(avg_score), 100)),
                 'is_turnaround': avg_score >= 50,
             })
     
     if not sector_data:
-        raise Exception("데이터를 가져올 수 없습니다")
+        raise Exception("데이터를 가져올 수 없습니다. 네트워크 연결을 확인하세요.")
     
     return {
         'sectors': pd.DataFrame(sector_data),
-        'stocks': pd.DataFrame(stock_data),
+        'stocks': pd.DataFrame(stock_data) if stock_data else pd.DataFrame(),
         'dates': dates,
     }
 
