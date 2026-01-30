@@ -605,9 +605,10 @@ def main():
         
         # 스타일링된 테이블
         def highlight_turnaround(row):
-            if row['turnaround_score'] >= 70:
+            score = row['스코어']
+            if score >= 70:
                 return ['background-color: rgba(0, 210, 106, 0.2)'] * len(row)
-            elif row['turnaround_score'] >= 50:
+            elif score >= 50:
                 return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
             else:
                 return ['background-color: rgba(255, 107, 107, 0.2)'] * len(row)
