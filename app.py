@@ -73,57 +73,137 @@ def load_market_data(market: str, use_real_data: bool = False):
 
 def load_real_data(market: str):
     """실제 데이터 로드 (FinanceDataReader 사용)"""
-    import FinanceDataReader as fdr
+    try:
+        import FinanceDataReader as fdr
+    except ImportError:
+        raise Exception("FinanceDataReader가 설치되어 있지 않습니다. pip install finance-datareader")
     
     end_date = datetime.now()
     start_date = end_date - timedelta(days=120)
     
     if market == "KOSPI":
-        # KOSPI 섹터별 대표 종목
         sector_stocks = {
-            '반도체': ['005930', '000660', '042700'],  # 삼성전자, SK하이닉스, 한미반도체
-            '자동차': ['005380', '000270', '012330'],  # 현대차, 기아, 현대모비스
-            '금융': ['105560', '055550', '086790'],    # KB금융, 신한지주, 하나금융
-            '바이오': ['207940', '068270', '326030'],  # 삼성바이오, 셀트리온, SK바이오팜
-            '2차전지': ['373220', '006400', '096770'], # LG에너지솔루션, 삼성SDI, SK이노베이션
-            '철강': ['005490', '004020', '001230'],    # POSCO홀딩스, 현대제철, 동국제강
-            '화학': ['051910', '010950', '011170'],    # LG화학, S-Oil, 롯데케미칼
-            '조선': ['009540', '010620', '042660'],    # 한국조선해양, 현대미포조선, 대우조선해양
+            '반도체': {'005930': '삼성전자', '000660': 'SK하이닉스', '042700': '한미반도체'},
+            '자동차': {'005380': '현대차', '000270': '기아', '012330': '현대모비스'},
+            '금융': {'105560': 'KB금융', '055550': '신한지주', '086790': '하나금융'},
+            '바이오': {'207940': '삼성바이오', '068270': '셀트리온', '326030': 'SK바이오팜'},
+            '2차전지': {'373220': 'LG에너지솔루션', '006400': '삼성SDI', '096770': 'SK이노베이션'},
+            '철강': {'005490': 'POSCO홀딩스', '004020': '현대제철', '001230': '동국제강'},
+            '화학': {'051910': 'LG화학', '010950': 'S-Oil', '011170': '롯데케미칼'},
+            '조선': {'009540': '한국조선해양', '010620': '현대미포조선', '042660': '대우조선해양'},
         }
     elif market == "KOSDAQ":
         sector_stocks = {
-            '바이오': ['196170', '298380', '141080'],  # 알테오젠, 에이비엘바이오, 레고켐바이오
-            '2차전지소재': ['247540', '066570', '278280'], # 에코프로비엠, LG전자, 천보
-            '게임': ['263750', '112040', '036570'],    # 펄어비스, 위메이드, 엔씨소프트
-            'IT서비스': ['035420', '035720', '251270'], # NAVER, 카카오, 넷마블
-            '반도체장비': ['036830', '098460', '322310'], # 솔브레인, 고영, 오로스테크놀로지
+            '바이오': {'196170': '알테오젠', '298380': '에이비엘바이오', '141080': '레고켐바이오'},
+            '2차전지소재': {'247540': '에코프로비엠', '278280': '천보', '086520': '에코프로'},
+            '게임': {'263750': '펄어비스', '112040': '위메이드', '194480': '데브시스터즈'},
+            'IT서비스': {'403870': '플레이트', '053800': '안랩', '030520': '한글과컴퓨터'},
+            '반도체장비': {'036830': '솔브레인홀딩스', '098460': '고영', '240810': '원익IPS'},
         }
     else:  # US
         sector_stocks = {
-            'Technology': ['NVDA', 'AAPL', 'MSFT', 'GOOGL', 'META'],
-            'Healthcare': ['UNH', 'JNJ', 'PFE', 'ABBV', 'MRK'],
-            'Financials': ['JPM', 'BAC', 'WFC', 'GS', 'MS'],
-            'Energy': ['XOM', 'CVX', 'COP', 'SLB', 'EOG'],
-            'Consumer': ['AMZN', 'TSLA', 'WMT', 'HD', 'NKE'],
+            'Technology': {'NVDA': 'NVIDIA', 'AAPL': 'Apple', 'MSFT': 'Microsoft', 'GOOGL': 'Google', 'META': 'Meta'},
+            'Healthcare': {'UNH': 'UnitedHealth', 'JNJ': 'J&J', 'PFE': 'Pfizer', 'ABBV': 'Abbvie', 'MRK': 'Merck'},
+            'Financials': {'JPM': 'JPMorgan', 'BAC': 'Bank of America', 'WFC': 'Wells Fargo', 'GS': 'Goldman', 'MS': 'Morgan Stanley'},
+            'Energy': {'XOM': 'Exxon', 'CVX': 'Chevron', 'COP': 'ConocoPhillips', 'SLB': 'Schlumberger', 'EOG': 'EOG'},
+            'Consumer': {'AMZN': 'Amazon', 'TSLA': 'Tesla', 'WMT': 'Walmart', 'HD': 'Home Depot', 'NKE': 'Nike'},
         }
     
-    all_data = []
+    dates = pd.date_range(end=datetime.now(), periods=90, freq='D')
+    sector_data = []
+    stock_data = []
     
-    for sector, stocks in sector_stocks.items():
-        for stock in stocks:
+    for sector_name, stocks in sector_stocks.items():
+        sector_prices = []
+        
+        for code, name in stocks.items():
             try:
-                df = fdr.DataReader(stock, start_date, end_date)
-                if len(df) > 0:
-                    df['Sector'] = sector
-                    df['Stock'] = stock
-                    all_data.append(df)
-            except:
+                df = fdr.DataReader(code, start_date, end_date)
+                if len(df) > 20:
+                    prices = df['Close'].values
+                    
+                    # 기술적 지표 계산
+                    ma20 = pd.Series(prices).rolling(20).mean().iloc[-1]
+                    ma60 = pd.Series(prices).rolling(min(60, len(prices))).mean().iloc[-1]
+                    
+                    delta = pd.Series(prices).diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+                    rs = gain / loss
+                    rsi = (100 - (100 / (1 + rs))).iloc[-1]
+                    
+                    low_price = min(prices)
+                    current_price = prices[-1]
+                    from_low = ((current_price - low_price) / low_price) * 100
+                    ma20_vs_ma60 = ((ma20 / ma60) - 1) * 100 if ma60 > 0 else 0
+                    
+                    # 스코어 계산
+                    score = 0
+                    score += min(from_low / 2, 30)
+                    score += 20 if ma20 > ma60 else 0
+                    score += min(max(rsi - 30, 0) / 2, 25) if not np.isnan(rsi) else 0
+                    score += 15  # 거래량 기본점수
+                    
+                    is_turnaround = score >= 50
+                    
+                    stock_data.append({
+                        'sector': sector_name,
+                        'stock': name,
+                        'from_low': round(from_low, 1),
+                        'ma20_vs_ma60': round(ma20_vs_ma60, 2),
+                        'rsi': round(rsi, 1) if not np.isnan(rsi) else 50,
+                        'volume_ratio': 100,
+                        'foreign_buy': 0,
+                        'turnaround_score': round(min(score, 100)),
+                        'is_turnaround': is_turnaround,
+                    })
+                    
+                    # 섹터 평균용 데이터 수집
+                    sector_prices.append({
+                        'prices': (prices / prices[0] * 100).tolist()[-90:],
+                        'from_low': from_low,
+                        'ma20_vs_ma60': ma20_vs_ma60,
+                        'rsi': rsi if not np.isnan(rsi) else 50,
+                        'score': score
+                    })
+            except Exception as e:
                 continue
+        
+        # 섹터 평균 계산
+        if sector_prices:
+            avg_from_low = np.mean([s['from_low'] for s in sector_prices])
+            avg_ma = np.mean([s['ma20_vs_ma60'] for s in sector_prices])
+            avg_rsi = np.mean([s['rsi'] for s in sector_prices])
+            avg_score = np.mean([s['score'] for s in sector_prices])
+            
+            # 가격 데이터 평균
+            min_len = min(len(s['prices']) for s in sector_prices)
+            avg_prices = np.mean([s['prices'][:min_len] for s in sector_prices], axis=0)
+            
+            sector_data.append({
+                'sector': sector_name,
+                'prices': avg_prices.tolist(),
+                'dates': dates[:len(avg_prices)].tolist(),
+                'current_price': avg_prices[-1],
+                'from_low': round(avg_from_low, 1),
+                'ma20': 0,
+                'ma60': 0,
+                'ma20_vs_ma60': round(avg_ma, 2),
+                'rsi': round(avg_rsi, 1),
+                'volume_ratio': 100,
+                'foreign_buy': 0,
+                'turnaround_score': round(min(avg_score, 100)),
+                'is_turnaround': avg_score >= 50,
+            })
     
-    if all_data:
-        return pd.concat(all_data)
-    else:
+    if not sector_data:
         raise Exception("데이터를 가져올 수 없습니다")
+    
+    return {
+        'sectors': pd.DataFrame(sector_data),
+        'stocks': pd.DataFrame(stock_data),
+        'dates': dates,
+    }
 
 
 def generate_sample_data(market: str) -> dict:
